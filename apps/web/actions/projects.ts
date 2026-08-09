@@ -39,7 +39,12 @@ export async function getProjects() {
   const { userId } = await auth();
   if (!userId) return [];
 
-  return db.select().from(projects).where(eq(projects.userId, userId));
+  try {
+    return await db.select().from(projects).where(eq(projects.userId, userId));
+  } catch (err) {
+    console.error('[getProjects] DB query failed — have you run drizzle-kit push?', err);
+    return [];
+  }
 }
 
 export async function getProject(id: string) {

@@ -7,13 +7,14 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   const { id } = await params;
   const project = await getProject(id);
 
-  const snippet = `<script>
-  (function(t,r,a,c,e){
-    t.TraceObject=e;t[e]=t[e]||function(){(t[e].q=t[e].q||[]).push(arguments)};
-    var s=r.createElement('script');s.async=1;s.src=a;
-    var f=r.getElementsByTagName('script')[0];f.parentNode.insertBefore(s,f);
-  })(window,document,'${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'}/tracker.js','','trace');
-  trace('init', '${project.apiKey}');
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+  const snippet = `<!-- Trace Analytics -->
+<script>
+  window.trace=window.trace||function(){(window.trace.q=window.trace.q||[]).push(arguments)};
+</script>
+<script src="${apiUrl}/tracker.js" async></script>
+<script>
+  trace('init', '${project.apiKey}', { endpoint: '${apiUrl}' });
 </script>`;
 
   return (

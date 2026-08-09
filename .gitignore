@@ -6,3 +6,5 @@ dist
 .turbo
 *.tsbuildinfo
 PROGRESS.md
+# Keep tracker build output tracked so API can serve it
+!packages/tracker/dist/
