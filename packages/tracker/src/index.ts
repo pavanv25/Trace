@@ -23,8 +23,14 @@ declare global {
   let _apiKey = '';
   let _endpoint = '';
   let _initialized = false;
+  // Cached fallback IDs for environments where storage is blocked
+  let _anonFallback = '';
+  let _sessionFallback = '';
 
   function uid(): string {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
     return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
   }
 
@@ -37,7 +43,8 @@ declare global {
       }
       return id;
     } catch {
-      return uid();
+      if (!_anonFallback) _anonFallback = uid();
+      return _anonFallback;
     }
   }
 
@@ -50,12 +57,20 @@ declare global {
       }
       return id;
     } catch {
-      return uid();
+      if (!_sessionFallback) _sessionFallback = uid();
+      return _sessionFallback;
     }
   }
 
+  function isBot(): boolean {
+    // Skip headless browsers and known bots
+    if (navigator.webdriver) return true;
+    const ua = navigator.userAgent.toLowerCase();
+    return /bot|crawler|spider|headless|prerender|phantomjs/.test(ua);
+  }
+
   function send(eventName: string, props?: Record<string, unknown>): void {
-    if (!_apiKey || !_endpoint) return;
+    if (!_apiKey || !_endpoint || isBot()) return;
 
     const payload = JSON.stringify({
       api_key: _apiKey,
@@ -99,15 +114,19 @@ declare global {
         const target = e.target as HTMLElement;
         const el = target.closest('button, a, [data-track]') as HTMLElement | null;
         if (!el) return;
+        // Prefer explicit label attributes over textContent to avoid SVG/icon noise
+        const label =
+          el.getAttribute('aria-label') ||
+          el.getAttribute('data-track') ||
+          el.getAttribute('title') ||
+          (el as HTMLInputElement).value ||
+          (el.innerText || '').trim().slice(0, 100) ||
+          undefined;
         send('click', {
           element: el.tagName.toLowerCase(),
-          text: (el.textContent || '').trim().slice(0, 100) || undefined,
+          label,
           href: (el as HTMLAnchorElement).href || undefined,
           id: el.id || undefined,
-          label:
-            el.getAttribute('aria-label') ||
-            el.getAttribute('data-track') ||
-            undefined,
         });
       },
       { passive: true }
@@ -115,6 +134,10 @@ declare global {
   }
 
   function initSPATracking(): void {
+    // Guard against double-patching (e.g. script loaded twice via tag manager)
+    if ((history as History & { __tracePatch?: boolean }).__tracePatch) return;
+    (history as History & { __tracePatch?: boolean }).__tracePatch = true;
+
     const origPush = history.pushState.bind(history);
     history.pushState = function (...args: Parameters<typeof history.pushState>) {
       origPush(...args);

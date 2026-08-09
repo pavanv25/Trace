@@ -10,7 +10,7 @@ const app = new Hono();
 app.use('*', logger());
 
 // Open CORS for public endpoints — tracking scripts run on any domain
-app.use('/collect/*', cors());
+app.use('/collect', cors());
 app.use('/tracker.js', cors());
 
 app.get('/health', (c) => c.json({ ok: true }));

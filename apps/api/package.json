@@ -9,7 +9,8 @@
   "dependencies": {
     "@hono/node-server": "^1.13.8",
     "@trace/db": "workspace:*",
-    "hono": "^4.7.11"
+    "hono": "^4.7.11",
+    "ua-parser-js": "^2.0.10"
   },
   "devDependencies": {
     "tsx": "^4",
