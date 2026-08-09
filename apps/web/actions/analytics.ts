@@ -6,7 +6,9 @@ import { redirect } from 'next/navigation';
 import { db } from '@/lib/db';
 import { events, projects } from '@trace/db';
 
-async function assertProjectOwner(projectId: string): Promise<void> {
+// Returns userId after verifying auth + ownership. Redirects on failure.
+// Call this BEFORE any Promise.all to ensure redirect() propagates correctly.
+export async function assertProjectOwner(projectId: string): Promise<string> {
   const { userId } = await auth();
   if (!userId) redirect('/sign-in');
   const [p] = await db
@@ -15,12 +17,29 @@ async function assertProjectOwner(projectId: string): Promise<void> {
     .where(and(eq(projects.id, projectId), eq(projects.userId, userId)))
     .limit(1);
   if (!p) redirect('/dashboard');
+  return userId;
 }
 
 function since(days: number): Date {
   const d = new Date();
   d.setDate(d.getDate() - days);
   return d;
+}
+
+// Fills a date-spine so every day in the range appears, even with 0 events.
+function fillDateSpine(
+  rows: { date: string; count: number }[],
+  days: number
+): { date: string; count: number }[] {
+  const map = new Map(rows.map((r) => [r.date, r.count]));
+  const result: { date: string; count: number }[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10); // YYYY-MM-DD
+    result.push({ date: key, count: map.get(key) ?? 0 });
+  }
+  return result;
 }
 
 export async function getStats(projectId: string, days = 7) {
@@ -53,26 +72,32 @@ export async function getPageViewsOverTime(projectId: string, days = 7) {
   await assertProjectOwner(projectId);
   const from = since(days);
 
-  return db
+  const rows = await db
     .select({
-      date: sql<string>`to_char(date_trunc('day', ${events.timestamp}), 'YYYY-MM-DD')`,
+      date: sql<string>`to_char(date_trunc('day', ${events.timestamp} AT TIME ZONE 'UTC'), 'YYYY-MM-DD')`,
       count: count(),
     })
     .from(events)
     .where(and(eq(events.projectId, projectId), eq(events.eventName, 'page_view'), gte(events.timestamp, from)))
-    .groupBy(sql`date_trunc('day', ${events.timestamp})`)
-    .orderBy(sql`date_trunc('day', ${events.timestamp})`);
+    .groupBy(sql`date_trunc('day', ${events.timestamp} AT TIME ZONE 'UTC')`)
+    .orderBy(sql`date_trunc('day', ${events.timestamp} AT TIME ZONE 'UTC')`);
+
+  return fillDateSpine(rows.map((r) => ({ date: r.date, count: Number(r.count) })), days);
 }
 
 export async function getTopPages(projectId: string, days = 7) {
   await assertProjectOwner(projectId);
   const from = since(days);
 
+  // Group by path only (strip query strings) using regexp_replace
   return db
-    .select({ url: events.url, count: count() })
+    .select({
+      url: sql<string>`regexp_replace(${events.url}, '\\?.*$', '')`,
+      count: count(),
+    })
     .from(events)
-    .where(and(eq(events.projectId, projectId), eq(events.eventName, 'page_view'), gte(events.timestamp, from)))
-    .groupBy(events.url)
+    .where(and(eq(events.projectId, projectId), eq(events.eventName, 'page_view'), gte(events.timestamp, from), sql`${events.url} IS NOT NULL`))
+    .groupBy(sql`regexp_replace(${events.url}, '\\?.*$', '')`)
     .orderBy(desc(count()))
     .limit(10);
 }
@@ -114,4 +139,43 @@ export async function getDeviceBreakdown(projectId: string, days = 7) {
     .groupBy(events.deviceType)
     .orderBy(desc(count()))
     .limit(6);
+}
+
+export async function getCountryBreakdown(projectId: string, days = 7) {
+  await assertProjectOwner(projectId);
+  const from = since(days);
+
+  return db
+    .select({ name: events.country, count: count() })
+    .from(events)
+    .where(and(eq(events.projectId, projectId), gte(events.timestamp, from), sql`${events.country} IS NOT NULL`))
+    .groupBy(events.country)
+    .orderBy(desc(count()))
+    .limit(10);
+}
+
+export async function getReferrerBreakdown(projectId: string, days = 7) {
+  await assertProjectOwner(projectId);
+  const from = since(days);
+
+  return db
+    .select({ referrer: events.referrer, count: count() })
+    .from(events)
+    .where(and(eq(events.projectId, projectId), eq(events.eventName, 'page_view'), gte(events.timestamp, from), sql`${events.referrer} IS NOT NULL`))
+    .groupBy(events.referrer)
+    .orderBy(desc(count()))
+    .limit(10);
+}
+
+// Returns count of unique sessions active in the last 5 minutes
+export async function getActiveUsers(projectId: string) {
+  await assertProjectOwner(projectId);
+  const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
+
+  const [row] = await db
+    .select({ count: countDistinct(events.sessionId) })
+    .from(events)
+    .where(and(eq(events.projectId, projectId), gte(events.timestamp, fiveMinAgo), sql`${events.sessionId} IS NOT NULL`));
+
+  return row?.count ?? 0;
 }

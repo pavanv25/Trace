@@ -1,19 +1,27 @@
+import { Suspense } from 'react';
 import { getProject } from '@/actions/projects';
 import { deleteProject } from '@/actions/projects';
 import {
+  assertProjectOwner,
   getStats,
   getPageViewsOverTime,
   getTopPages,
   getTopEvents,
   getBrowserBreakdown,
   getDeviceBreakdown,
+  getCountryBreakdown,
+  getReferrerBreakdown,
+  getActiveUsers,
 } from '@/actions/analytics';
 import { Trash2, Eye, Users, Zap } from 'lucide-react';
 import { CopyButton } from './copy-button';
 import { PageViewsChart } from '@/components/PageViewsChart';
 import { BreakdownChart } from '@/components/BreakdownChart';
+import { DateRangeSelector } from '@/components/DateRangeSelector';
+import { ActiveUsers } from '@/components/ActiveUsers';
+import { DeleteProjectButton } from './delete-button';
 
-const DAYS = 7;
+const VALID_DAYS = [7, 14, 30];
 
 function StatCard({ label, value, icon: Icon }: { label: string; value: number; icon: React.ElementType }) {
   return (
@@ -29,18 +37,67 @@ function StatCard({ label, value, icon: Icon }: { label: string; value: number; 
   );
 }
 
-export default async function ProjectPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+function safePathname(url: string | null): string {
+  if (!url) return '—';
+  try { return new URL(url).pathname; } catch { return url; }
+}
 
-  const [project, stats, chartData, topPages, topEvents, browsers, devices] = await Promise.all([
+function safeHostname(url: string | null): string {
+  if (!url) return '(direct)';
+  try { return new URL(url).hostname; } catch { return url; }
+}
+
+export default async function ProjectPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ days?: string }>;
+}) {
+  const { id } = await params;
+  const { days: daysParam } = await searchParams;
+  const days = VALID_DAYS.includes(Number(daysParam)) ? Number(daysParam) : 7;
+
+  // Auth + ownership check runs first — redirect() propagates correctly outside Promise.all
+  await assertProjectOwner(id);
+
+  const [
+    project,
+    statsResult,
+    chartResult,
+    topPagesResult,
+    topEventsResult,
+    browsersResult,
+    devicesResult,
+    countriesResult,
+    referrersResult,
+    activeNowResult,
+  ] = await Promise.allSettled([
     getProject(id),
-    getStats(id, DAYS),
-    getPageViewsOverTime(id, DAYS),
-    getTopPages(id, DAYS),
-    getTopEvents(id, DAYS),
-    getBrowserBreakdown(id, DAYS),
-    getDeviceBreakdown(id, DAYS),
+    getStats(id, days),
+    getPageViewsOverTime(id, days),
+    getTopPages(id, days),
+    getTopEvents(id, days),
+    getBrowserBreakdown(id, days),
+    getDeviceBreakdown(id, days),
+    getCountryBreakdown(id, days),
+    getReferrerBreakdown(id, days),
+    getActiveUsers(id),
   ]);
+
+  // Project must succeed — nothing to show otherwise
+  if (project.status === 'rejected') throw project.reason;
+
+  const p = project.value;
+  const stats = statsResult.status === 'fulfilled' ? statsResult.value : { pageViews: 0, uniqueVisitors: 0, totalEvents: 0 };
+  const chartData = chartResult.status === 'fulfilled' ? chartResult.value : [];
+  const topPages = topPagesResult.status === 'fulfilled' ? topPagesResult.value : [];
+  const topEvents = topEventsResult.status === 'fulfilled' ? topEventsResult.value : [];
+  const browsers = browsersResult.status === 'fulfilled' ? browsersResult.value : [];
+  const devices = devicesResult.status === 'fulfilled' ? devicesResult.value : [];
+  const countries = countriesResult.status === 'fulfilled' ? countriesResult.value : [];
+  const referrers = referrersResult.status === 'fulfilled' ? referrersResult.value : [];
+  const activeNow = activeNowResult.status === 'fulfilled' ? activeNowResult.value : 0;
 
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
   const snippet = `<!-- Trace Analytics -->
@@ -49,16 +106,23 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
 </script>
 <script src="${apiUrl}/tracker.js" async></script>
 <script>
-  trace('init', '${project.apiKey}', { endpoint: '${apiUrl}' });
+  trace('init', '${p.apiKey}', { endpoint: '${apiUrl}' });
 </script>`;
 
   return (
     <div className="max-w-4xl space-y-8">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-zinc-900">{project.name}</h1>
-        {project.domain && <p className="text-zinc-500 text-sm mt-1">{project.domain}</p>}
-        <p className="text-xs text-zinc-400 mt-1">Last {DAYS} days</p>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold text-zinc-900">{p.name}</h1>
+          {p.domain && <p className="text-zinc-500 text-sm mt-1">{p.domain}</p>}
+        </div>
+        <div className="flex items-center gap-4 flex-wrap">
+          <ActiveUsers projectId={id} initial={Number(activeNow)} />
+          <Suspense>
+            <DateRangeSelector current={days} />
+          </Suspense>
+        </div>
       </div>
 
       {/* Stats row */}
@@ -71,7 +135,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
       {/* Page views over time */}
       <div className="bg-white rounded-xl border border-zinc-200 p-5">
         <h2 className="text-sm font-semibold text-zinc-700 mb-4">Page views over time</h2>
-        <PageViewsChart data={chartData.map((d) => ({ date: d.date, count: Number(d.count) }))} />
+        <PageViewsChart data={chartData.map((d) => ({ date: d.date, count: d.count }))} />
       </div>
 
       {/* Top pages + Top events */}
@@ -82,12 +146,12 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
             <p className="text-sm text-zinc-400">No data yet</p>
           ) : (
             <ul className="space-y-2">
-              {topPages.map((p, i) => (
-                <li key={i} className="flex items-center justify-between text-sm">
-                  <span className="text-zinc-700 truncate max-w-[200px]" title={p.url ?? ''}>
-                    {p.url ? new URL(p.url).pathname : '—'}
+              {topPages.map((pg, i) => (
+                <li key={pg.url ?? i} className="flex items-center justify-between text-sm">
+                  <span className="text-zinc-700 truncate max-w-[200px]" title={pg.url ?? ''}>
+                    {safePathname(pg.url)}
                   </span>
-                  <span className="text-zinc-500 tabular-nums">{Number(p.count).toLocaleString()}</span>
+                  <span className="text-zinc-500 tabular-nums">{Number(pg.count).toLocaleString()}</span>
                 </li>
               ))}
             </ul>
@@ -101,9 +165,44 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
           ) : (
             <ul className="space-y-2">
               {topEvents.map((e, i) => (
-                <li key={i} className="flex items-center justify-between text-sm">
+                <li key={e.eventName ?? i} className="flex items-center justify-between text-sm">
                   <span className="text-zinc-700 font-mono">{e.eventName}</span>
                   <span className="text-zinc-500 tabular-nums">{Number(e.count).toLocaleString()}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      {/* Referrers + Countries */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-white rounded-xl border border-zinc-200 p-5">
+          <h2 className="text-sm font-semibold text-zinc-700 mb-4">Referrers</h2>
+          {referrers.length === 0 ? (
+            <p className="text-sm text-zinc-400">No referral traffic</p>
+          ) : (
+            <ul className="space-y-2">
+              {referrers.map((r, i) => (
+                <li key={r.referrer ?? i} className="flex items-center justify-between text-sm">
+                  <span className="text-zinc-700 truncate max-w-[200px]" title={r.referrer ?? ''}>{safeHostname(r.referrer)}</span>
+                  <span className="text-zinc-500 tabular-nums">{Number(r.count).toLocaleString()}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="bg-white rounded-xl border border-zinc-200 p-5">
+          <h2 className="text-sm font-semibold text-zinc-700 mb-4">Countries</h2>
+          {countries.length === 0 ? (
+            <p className="text-sm text-zinc-400">No geo data yet</p>
+          ) : (
+            <ul className="space-y-2">
+              {countries.map((c, i) => (
+                <li key={c.name ?? i} className="flex items-center justify-between text-sm">
+                  <span className="text-zinc-700">{c.name ?? 'Unknown'}</span>
+                  <span className="text-zinc-500 tabular-nums">{Number(c.count).toLocaleString()}</span>
                 </li>
               ))}
             </ul>
@@ -142,8 +241,8 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
       <section>
         <h2 className="text-sm font-semibold text-zinc-700 mb-3">API Key</h2>
         <div className="flex items-center gap-2 bg-zinc-100 rounded-md px-4 py-3">
-          <code className="text-sm text-zinc-800 flex-1 font-mono">{project.apiKey}</code>
-          <CopyButton text={project.apiKey} />
+          <code className="text-sm text-zinc-800 flex-1 font-mono">{p.apiKey}</code>
+          <CopyButton text={p.apiKey} />
         </div>
         <p className="text-xs text-zinc-400 mt-2">
           This key is public — it can only write events, not read them.
@@ -152,15 +251,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
 
       {/* Danger zone */}
       <div className="pt-6 border-t border-zinc-200">
-        <form action={deleteProject.bind(null, project.id)}>
-          <button
-            type="submit"
-            className="flex items-center gap-2 text-sm text-red-600 hover:text-red-800 transition-colors"
-          >
-            <Trash2 className="w-4 h-4" />
-            Delete project
-          </button>
-        </form>
+        <DeleteProjectButton projectId={p.id} projectName={p.name} />
       </div>
     </div>
   );
