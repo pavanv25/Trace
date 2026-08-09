@@ -1,8 +1,8 @@
 'use client';
 
 import {
-  LineChart,
-  Line,
+  AreaChart,
+  Area,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -15,46 +15,70 @@ interface DataPoint {
   count: number;
 }
 
+function formatDate(dateStr: string, short = false) {
+  const d = new Date(dateStr + 'T00:00:00Z');
+  if (short) return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
 export function PageViewsChart({ data }: { data: DataPoint[] }) {
-  if (data.length === 0) {
-    return (
-      <div className="flex h-48 items-center justify-center text-sm text-gray-400">
-        No data for this period
-      </div>
-    );
-  }
+  const hasData = data.some((d) => d.count > 0);
 
   return (
-    <ResponsiveContainer width="100%" height={200}>
-      <LineChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -24 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-        <XAxis
-          dataKey="date"
-          tick={{ fontSize: 12, fill: '#9ca3af' }}
-          tickFormatter={(v: string) => {
-            const d = new Date(v + 'T00:00:00');
-            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-          }}
-        />
-        <YAxis tick={{ fontSize: 12, fill: '#9ca3af' }} allowDecimals={false} />
-        <Tooltip
-          contentStyle={{ fontSize: 13, borderRadius: 8, border: '1px solid #e5e7eb' }}
-          labelFormatter={(v) => {
-            if (typeof v !== 'string') return String(v);
-            const d = new Date(v + 'T00:00:00');
-            return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-          }}
-          formatter={(value) => [value, 'Page views']}
-        />
-        <Line
-          type="monotone"
-          dataKey="count"
-          stroke="#6366f1"
-          strokeWidth={2}
-          dot={false}
-          activeDot={{ r: 4 }}
-        />
-      </LineChart>
-    </ResponsiveContainer>
+    <div className="relative">
+      {!hasData && (
+        <div className="absolute inset-0 flex items-center justify-center z-10">
+          <p className="text-sm text-slate-400">No page views in this period</p>
+        </div>
+      )}
+      <ResponsiveContainer width="100%" height={200}>
+        <AreaChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
+          <defs>
+            <linearGradient id="pageViewsGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#6366f1" stopOpacity={0.15} />
+              <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+          <XAxis
+            dataKey="date"
+            tick={{ fontSize: 11, fill: '#94a3b8' }}
+            tickLine={false}
+            axisLine={false}
+            tickFormatter={(v: string) => formatDate(v, true)}
+            interval="preserveStartEnd"
+          />
+          <YAxis
+            tick={{ fontSize: 11, fill: '#94a3b8' }}
+            tickLine={false}
+            axisLine={false}
+            allowDecimals={false}
+          />
+          <Tooltip
+            contentStyle={{
+              fontSize: 12,
+              borderRadius: 10,
+              border: '1px solid #e2e8f0',
+              boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+              padding: '8px 12px',
+            }}
+            labelStyle={{ color: '#475569', fontWeight: 500, marginBottom: 4 }}
+            itemStyle={{ color: '#6366f1' }}
+            labelFormatter={(v: unknown) => formatDate(String(v))}
+            formatter={(value) => [value, 'Page views']}
+            cursor={{ stroke: '#6366f1', strokeWidth: 1, strokeDasharray: '4 4' }}
+          />
+          <Area
+            type="monotone"
+            dataKey="count"
+            stroke="#6366f1"
+            strokeWidth={2}
+            fill="url(#pageViewsGradient)"
+            dot={false}
+            activeDot={{ r: 4, fill: '#6366f1', strokeWidth: 2, stroke: '#fff' }}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
   );
 }

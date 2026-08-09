@@ -19,15 +19,15 @@ export function DateRangeSelector({ current }: { current: number }) {
   }
 
   return (
-    <div className="flex gap-1 rounded-lg border border-zinc-200 p-1 bg-white">
+    <div className="flex gap-0.5 rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
       {OPTIONS.map((o) => (
         <button
           key={o.value}
           onClick={() => select(o.value)}
-          className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
+          className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
             String(current) === o.value
-              ? 'bg-indigo-600 text-white'
-              : 'text-zinc-600 hover:bg-zinc-100'
+              ? 'bg-indigo-600 text-white shadow-sm'
+              : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
           }`}
         >
           {o.label}

@@ -19,8 +19,8 @@ export function CopyButton({ text, dark }: { text: string; dark?: boolean }) {
       className={cn(
         'p-1.5 rounded-md transition-colors',
         dark
-          ? 'text-zinc-400 hover:text-white hover:bg-zinc-800'
-          : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-200'
+          ? 'text-slate-400 hover:text-white hover:bg-slate-700'
+          : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
       )}
       title="Copy"
     >
