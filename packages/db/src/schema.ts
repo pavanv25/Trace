@@ -41,6 +41,7 @@ export const events = pgTable(
     index('events_project_id_idx').on(table.projectId),
     index('events_timestamp_idx').on(table.timestamp),
     index('events_project_timestamp_idx').on(table.projectId, table.timestamp),
+    index('events_project_event_timestamp_idx').on(table.projectId, table.eventName, table.timestamp),
   ]
 );
 

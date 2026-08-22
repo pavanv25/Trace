@@ -53,12 +53,20 @@ function validateProperties(v: unknown): Record<string, unknown> | null {
 }
 
 function clientIP(req: Request): string {
-  const forwarded =
-    req.headers.get('cf-connecting-ip') ??
-    req.headers.get('x-forwarded-for') ??
-    req.headers.get('x-real-ip') ??
-    '';
-  return forwarded.split(',')[0].trim() || '127.0.0.1';
+  // cf-connecting-ip is set by Cloudflare and is not forgeable
+  const cf = req.headers.get('cf-connecting-ip');
+  if (cf) return cf.trim();
+  // x-real-ip is set by most reverse proxies to the real client IP
+  const realIP = req.headers.get('x-real-ip');
+  if (realIP) return realIP.trim();
+  // x-forwarded-for: use the rightmost entry (appended by the trusted proxy),
+  // not the leftmost (which is attacker-controlled)
+  const forwarded = req.headers.get('x-forwarded-for');
+  if (forwarded) {
+    const parts = forwarded.split(',');
+    return parts[parts.length - 1].trim() || '127.0.0.1';
+  }
+  return '127.0.0.1';
 }
 
 collectRoute.post('/', async (c) => {
@@ -70,11 +78,19 @@ collectRoute.post('/', async (c) => {
     return c.json({ error: 'Invalid body' }, 400);
   }
 
+  // Validate all fields before hitting the database
   const apiKey = typeof body.api_key === 'string' ? body.api_key : null;
   if (!apiKey) return c.json({ error: 'Missing api_key' }, 400);
 
   const eventName = typeof body.event === 'string' ? body.event.slice(0, 100) : null;
   if (!eventName) return c.json({ error: 'Missing event' }, 400);
+
+  const url = validateURL(body.url);
+  const referrer = validateURL(body.referrer);
+  const sessionId = sanitizeString(body.session_id);
+  const anonymousId = sanitizeString(body.anonymous_id);
+  const properties = validateProperties(body.properties);
+  const timestamp = validateTimestamp(body.timestamp);
 
   const [project] = await db
     .select({ id: projects.id })
@@ -97,17 +113,17 @@ collectRoute.post('/', async (c) => {
     id: randomUUID(),
     projectId: project.id,
     eventName,
-    url: validateURL(body.url),
-    referrer: validateURL(body.referrer),
+    url,
+    referrer,
     browser: browser ?? null,
     os: os ?? null,
     deviceType: deviceType ?? null,
     country: country ?? null,
     city: city ?? null,
-    sessionId: sanitizeString(body.session_id),
-    anonymousId: sanitizeString(body.anonymous_id),
-    properties: validateProperties(body.properties),
-    timestamp: validateTimestamp(body.timestamp),
+    sessionId,
+    anonymousId,
+    properties,
+    timestamp,
   });
 
   return c.json({ ok: true });
